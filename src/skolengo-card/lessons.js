@@ -38,7 +38,8 @@ export const zoned = (iso, tz) => {
   const p = Object.fromEntries(ZONED[id].formatToParts(d).map((x) => [x.type, x.value]));
   return { day: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
 };
-export const zoneOf = (hass) => hass?.config?.time_zone || undefined;
+// Home Assistant's time zone, or the browser's when the user's profile asks for local time.
+export const zoneOf = (hass) => (hass?.locale?.time_zone === "local" ? undefined : hass?.config?.time_zone || undefined);
 
 // A lesson of the `lessons` attribute (timetable sensors) as the cards draw it.
 export const normLesson = (l, tz) => {
@@ -57,9 +58,14 @@ export const normLesson = (l, tz) => {
     teacher_name: teachers.join(", "),
     background_color: l.subject_color,
     canceled: l.canceled === true,
-    is_morning: !!a.time && a.time < "12:00",
-    is_afternoon: !!a.time && a.time >= "12:00",
   };
+};
+
+// A gap of 30 min or more around noon between two lessons (one ending by 14:00, the next starting from 11:00).
+export const isLunchBreak = (prev, l) => {
+  if (!prev?.end_time || !l?.start_time) return false;
+  const gap = Date.parse(l.start_at) - Date.parse(prev.end_at);
+  return gap >= 30 * 60000 && prev.end_time <= "14:00" && l.start_time >= "11:00";
 };
 
 export const lessonsOf = (s, tz) =>
@@ -68,19 +74,30 @@ export const lessonsOf = (s, tz) =>
     .map((l) => normLesson(l, tz))
     .sort((a, b) => String(a.start_at).localeCompare(String(b.start_at)));
 
+// Named HTML entities a French homework text uses; numeric ones are decoded whatever they are.
+export const ENTITIES = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", eacute: "é", egrave: "è", ecirc: "ê", euml: "ë", agrave: "à",
+  acirc: "â", ccedil: "ç", icirc: "î", iuml: "ï", ocirc: "ô", ugrave: "ù", ucirc: "û", uuml: "ü", oelig: "œ", aelig: "æ",
+  Eacute: "É", Egrave: "È", Ecirc: "Ê", Agrave: "À", Ccedil: "Ç", Ocirc: "Ô", OElig: "Œ", laquo: "«", raquo: "»",
+  rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", hellip: "…", ndash: "–", mdash: "—", euro: "€", deg: "°", middot: "·", bull: "•",
+};
+export const decodeEntities = (text) =>
+  text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+\d*);/gi, (m, code) => {
+    if (code[0] !== "#") return ENTITIES[code] ?? m;
+    const n = code[1] === "x" || code[1] === "X" ? Number.parseInt(code.slice(2), 16) : Number.parseInt(code.slice(1), 10);
+    return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
+  });
+
 // The text of a homework's HTML (Skolengo's description), without its tags.
 export const htmlText = (html) => {
   if (!html) return "";
-  const text = String(html)
-    .replace(/<\s*(br|\/p|\/div|\/li|\/h\d)\s*\/?>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'");
+  const text = decodeEntities(
+    String(html)
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/<\s*(br|\/p|\/div|\/li|\/h\d)\s*\/?>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "• ")
+      .replace(/<[^>]*>/g, ""),
+  );
   return text
     .split("\n")
     .map((x) => x.trim())
@@ -388,7 +405,10 @@ export class SkolengoBase extends HTMLElement {
   // signed for a short while before it opens in a new tab.
   async _openFile(path) {
     if (!/^\/api\/skolengo\//.test(String(path || ""))) return;
-    const win = window.open("", "_blank", "noopener");
+    // The tab is opened during the click (later, Safari blocks it), without `noopener` (window.open then returns
+    // null): the opener link is cut by hand before the signed address is loaded in it.
+    const win = window.open("", "_blank");
+    if (win) win.opener = null;
     try {
       const { path: signed } = await this._hass.callWS({ type: "auth/sign_path", path, expires: 60 });
       if (win) win.location.href = signed;
@@ -678,8 +698,7 @@ export class SkolengoBase extends HTMLElement {
     if (!shown.length) return `<div class="empty">${esc(this._t("no_lessons"))}</div>`;
     const out = [];
     shown.forEach((l, i) => {
-      const prev = shown[i - 1];
-      if (prev?.is_morning && l.is_afternoon) out.push(`<div class="break">${svgIcon("food")}<span>${esc(this._t("lunch_break"))}</span></div>`);
+      if (isLunchBreak(shown[i - 1], l)) out.push(`<div class="break">${svgIcon("food")}<span>${esc(this._t("lunch_break"))}</span></div>`);
       out.push(this._lesson(l, entity));
     });
     return `<div class="lessons">${out.join("")}</div>`;

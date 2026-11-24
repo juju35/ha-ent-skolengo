@@ -2,7 +2,7 @@
 // Full card
 // ---------------------------------------------------------------------------
 import { DEFAULT_COLLAPSED, DEFAULT_MAX_GRADES, TABS, TAB_ICONS, esc, list, valid } from "./core.js";
-import { dayLabel, keyOf, shortDay, timeOf } from "./dates.js";
+import { dayLabel, keyOf, shortDay, timeOf, todayKey } from "./dates.js";
 import { colorOf, fmtNum, gradeClass, levelClass, parseNum, svgIcon } from "./numbers.js";
 import { BASE_STYLE, DIALOG_STYLE, FULL_STYLE } from "./styles.js";
 import { SCENE_STYLE } from "./picture.js";
@@ -123,11 +123,14 @@ export class SkolengoCard extends SkolengoBase {
   }
 
   // The periods of the school year (terms or semesters, oldest first) and the one shown: picked with the period
-  // buttons, else the current one, else the last one. Without periods, the whole year.
+  // buttons, else the current one, else the last one already started (between two terms). Without periods, the
+  // whole year.
   _periods(s) {
     const src = this._s(s.entities.overall_average) || this._s(s.entities.grades);
     const periods = list(src, "periods").filter((p) => p && typeof p === "object" && p.id);
-    const chosen = periods.find((p) => p.id === this._period) || periods.find((p) => p.current) || periods.at(-1);
+    const today = todayKey();
+    const started = periods.filter((p) => !p.start_date || p.start_date <= today);
+    const chosen = periods.find((p) => p.id === this._period) || periods.find((p) => p.current) || started.at(-1) || periods[0];
     return { periods, chosen };
   }
 
@@ -136,11 +139,19 @@ export class SkolengoCard extends SkolengoBase {
     const grades = this._s(s.entities.grades);
     const avg = this._s(s.entities.overall_average);
     const id = period?.id;
-    const byPeriod = id ? grades?.attributes?.evaluations_by_period?.[id] : null;
-    const avgPeriod = id ? avg?.attributes?.average_by_period?.[id] : null;
+    // Per period when the integration gives the breakdown: a period it leaves out has no grades yet (it only lists
+    // the periods with evaluations), it never falls back to the whole year's.
+    const evalsBy = id ? grades?.attributes?.evaluations_by_period : undefined;
+    const avgBy = id ? avg?.attributes?.average_by_period : undefined;
+    const byPeriod = evalsBy && typeof evalsBy === "object" ? evalsBy[id] || {} : null;
+    const avgPeriod = avgBy && typeof avgBy === "object" ? avgBy[id] || {} : null;
     const evaluations = (byPeriod ? byPeriod.evaluations : list(grades, "evaluations")) || [];
-    const overall = id ? parseNum(avgPeriod?.average ?? byPeriod?.average) : valid(avg) ? parseNum(avg.state) : parseNum(grades?.attributes?.average);
-    const subjects = (id ? avgPeriod?.by_subject : list(avg, "by_subject")) || [];
+    const overall = byPeriod || avgPeriod
+      ? parseNum(avgPeriod?.average ?? byPeriod?.average)
+      : valid(avg)
+        ? parseNum(avg.state)
+        : parseNum(grades?.attributes?.average);
+    const subjects = (avgPeriod ? avgPeriod.by_subject : list(avg, "by_subject")) || [];
     return {
       evaluations: Array.isArray(evaluations) ? evaluations.filter((x) => x && typeof x === "object") : [],
       overall,
@@ -251,23 +262,24 @@ export class SkolengoCard extends SkolengoBase {
     const negative = parseNum(obsState?.attributes?.negative) ?? observations.filter((o) => o.tone === "NEGATIVE").length;
     const punishments = list(this._s(e.punishments), "punishments").filter((p) => p && typeof p === "object");
     const news = this._news(s);
-    // An absence or a late arrival is justified once the school has recorded its reason.
-    const justifiedOf = (a) => !!(a.reason || a.reason_code);
-    const unjustified = absences.filter((a) => !justifiedOf(a)).length;
+    // The school's processing of a record (Skolengo's absence file status): closed (LOCKED) or still pending.
+    const pendingOf = (a) => a.status === "NEW" || a.status === "IN_PROGRESS";
+    const pending = absences.filter(pendingOf).length;
     const tile = (id, icon, label, v, cls = "") =>
       id
         ? `<div class="tile clickable ${cls}" role="button" tabindex="0" data-entity="${esc(id)}"><div class="k">${svgIcon(icon)}<span>${esc(label)}</span></div><div class="v">${esc(v)}</div></div>`
         : "";
     const parts = [
       `<div class="tiles">${[
-        tile(e.absences, "absence", this._t("absences"), absences.length, unjustified ? "warn" : ""),
-        tile(e.delays, "delay", this._t("delays"), delays.length, delays.some((d) => !justifiedOf(d)) ? "warn" : ""),
+        tile(e.absences, "absence", this._t("absences"), absences.length, pending ? "warn" : ""),
+        tile(e.delays, "delay", this._t("delays"), delays.length, delays.some(pendingOf) ? "warn" : ""),
         tile(e.observations, "eye", this._t("observations"), observations.length || parseNum(obsState?.state) || 0, negative ? "warn" : ""),
         tile(e.punishments, "gavel", this._t("punishments"), punishments.length, punishments.length ? "crit" : ""),
       ].join("")}</div>`,
     ];
     if (tilesOnly) return parts[0];
-    const justified = (j) => this._tag(j ? "ok" : "warn", this._t(j ? "justified" : "unjustified"));
+    const status = (a) =>
+      a.status === "LOCKED" ? this._tag("ok", this._t("status_closed")) : pendingOf(a) ? this._tag("warn", this._t("status_pending")) : "";
     const empty = `<div class="empty">${esc(this._t("nothing"))}</div>`;
     const rows = (items, fn) => (items.length ? `<div class="rows">${items.map(fn).join("")}</div>` : empty);
     const when = (iso) => {
@@ -282,9 +294,9 @@ export class SkolengoCard extends SkolengoBase {
     const record = (entity, withStatus) => (a) =>
       `<div class="row clickable" role="button" tabindex="0" data-entity="${esc(entity)}"><div class="main"><div class="t1"><span>${esc(span(a) || "—")}</span></div><div class="t2">${esc(
         [a.reason, a.comment].filter(Boolean).join(" · "),
-      )}</div></div>${withStatus ? `<div class="end">${justified(justifiedOf(a))}</div>` : ""}</div>`;
+      )}</div></div>${withStatus && status(a) ? `<div class="end">${status(a)}</div>` : ""}</div>`;
     if (e.absences)
-      parts.push(this._section("absences", "absence", this._t("absences"), rows(absences, record(e.absences, true)), unjustified ? this._t("unjustified_count", { n: unjustified }) : ""));
+      parts.push(this._section("absences", "absence", this._t("absences"), rows(absences, record(e.absences, true)), pending ? this._t("pending_count", { n: pending }) : ""));
     if (e.delays) parts.push(this._section("delays", "delay", this._t("delays"), rows(delays, record(e.delays, true))));
     if (e.exemptions && exemptions.length) parts.push(this._section("exemptions", "exempt", this._t("exemptions"), rows(exemptions, record(e.exemptions, false))));
     if (e.observations) {

@@ -93,7 +93,7 @@ export const load = ({ now = NOW } = {}) => {
 // The script declares its names with const/class in the context's global lexical scope: read them back.
 const exportsOf = (sandbox) =>
   vm.runInContext(
-    `({ STRINGS, esc, lang, intlLocale, parseNum, gradeClass, levelClass, roleOf, resolve, findStudents, studentName, keyOf, addDays, dayLabel, lessonState, sceneSvg, zoned, normLesson, homeworkOf, htmlText,
+    `({ STRINGS, esc, lang, intlLocale, parseNum, gradeClass, levelClass, roleOf, resolve, findStudents, studentName, keyOf, addDays, dayLabel, lessonState, sceneSvg, zoned, zoneOf, normLesson, homeworkOf, htmlText, isLunchBreak,
        SkolengoCard: customElements.get("skolengo-card"), SkolengoMiniCard: customElements.get("skolengo-mini-card"),
        SkolengoCardEditor: customElements.get("skolengo-card-editor"), SkolengoMiniCardEditor: customElements.get("skolengo-mini-card-editor"),
        SkolengoPanel: customElements.get("skolengo-panel"), skolengoBadgeCount, skolengoPanelOf, window })`,

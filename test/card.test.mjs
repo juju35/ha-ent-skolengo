@@ -50,9 +50,22 @@ test("Skolengo instants are read in Home Assistant's time zone; homework HTML be
   const l = plain(pc.normLesson({ subject: "Maths", start: "2026-11-17T12:30:00Z", end: "2026-11-17T13:30:00Z", location: "B1", teachers: ["Mr A", "Ms B"] }, "Europe/Paris"));
   assert.equal(l.start_time, "13:30");
   assert.equal(l.teacher_name, "Mr A, Ms B");
-  assert.equal(l.is_afternoon, true);
+  assert.equal(pc.zoneOf({ config: { time_zone: "Europe/Paris" }, locale: { time_zone: "server" } }), "Europe/Paris");
+  assert.equal(pc.zoneOf({ config: { time_zone: "Europe/Paris" }, locale: { time_zone: "local" } }), undefined, "the profile asks for the browser's time");
   assert.equal(pc.htmlText("<p>Read <b>p. 12</b>&nbsp;&amp; 13</p><ul><li>Ex 1</li><li>Ex 2</li></ul>"), "Read p. 12 & 13\n• Ex 1\n• Ex 2");
   assert.equal(pc.htmlText(null), "");
+  assert.equal(pc.htmlText("<p>R&eacute;viser l&rsquo;&#233;quation &#x2013; &laquo;&nbsp;vite&nbsp;&raquo; &unknown;</p>"), "Réviser l’équation – « vite » &unknown;");
+  assert.equal(pc.htmlText("<style>p{color:red}</style><p>Texte</p><script>x()</script>"), "Texte");
+});
+
+test("the lunch break goes on a real gap around noon, not between back-to-back lessons", () => {
+  const at = (start, end) => pc.normLesson({ subject: "X", start: `2026-11-17T${start}:00+01:00`, end: `2026-11-17T${end}:00+01:00` }, "Europe/Paris");
+  assert.equal(pc.isLunchBreak(at("11:00", "12:00"), at("12:00", "13:00")), false, "back to back");
+  assert.equal(pc.isLunchBreak(at("12:00", "13:00"), at("14:00", "15:00")), true, "the gap after a 12:00 lesson");
+  assert.equal(pc.isLunchBreak(at("11:15", "12:15"), at("13:30", "14:30")), true);
+  assert.equal(pc.isLunchBreak(at("09:00", "10:00"), at("10:15", "11:15")), false, "a short morning break");
+  assert.equal(pc.isLunchBreak(at("15:00", "16:00"), at("17:00", "18:00")), false, "a gap in the late afternoon");
+  assert.equal(pc.isLunchBreak(undefined, at("08:00", "09:00")), false);
 });
 
 test("device and devices pick the students, by name or device id", () => {
@@ -165,10 +178,29 @@ test("period buttons switch the grades tab to another period; show_periods: fals
   assert.match(out, /No grades yet/);
   click(card, { action: "period", period: "t1" });
   assert.match(html(card), /Fractions quiz/);
+  // A period the integration leaves out of its breakdown (no evaluations yet): no grades, never the whole year's.
+  const id = "sensor.skolengo_alex_moreau_notes";
+  const avgId = "sensor.skolengo_alex_moreau_moyenne_generale";
+  const left = makeHass({
+    [id]: { ...states[id], attributes: { ...states[id].attributes, evaluations_by_period: { t1: states[id].attributes.evaluations_by_period.t1 } } },
+    [avgId]: { ...states[avgId], attributes: { ...states[avgId].attributes, average_by_period: { t1: states[avgId].attributes.average_by_period.t1 } } },
+  });
+  const t2 = render(pc.SkolengoCard, { device: "Alex Moreau", default_tab: "grades", collapsed: [] }, left);
+  click(t2, { action: "period", period: "t2" });
+  assert.doesNotMatch(html(t2), /Fractions quiz|Very good mastery|class="avg/);
+  assert.match(html(t2), /No grades yet/);
   const off = html(render(pc.SkolengoCard, { device: "Alex Moreau", default_tab: "grades", show_periods: false }));
   assert.doesNotMatch(off, /class="daybar periodbar"/);
   const sam = html(render(pc.SkolengoCard, { device: "Sam Moreau", default_tab: "grades" }));
   assert.doesNotMatch(sam, /class="daybar periodbar"/, "no periods");
+  // Between two terms (none current): the last one already started, not a future one.
+  const id2 = "sensor.skolengo_alex_moreau_notes";
+  const periods = [
+    { id: "t1", label: "Term 1", start_date: "2026-09-01", end_date: "2026-11-15", current: false },
+    { id: "t2", label: "Term 2", start_date: "2026-11-23", end_date: "2027-03-06", current: false },
+  ];
+  const gap = makeHass({ [id2]: { ...states[id2], attributes: { ...states[id2].attributes, periods } }, "sensor.skolengo_alex_moreau_moyenne_generale": { ...states["sensor.skolengo_alex_moreau_moyenne_generale"], attributes: { ...states["sensor.skolengo_alex_moreau_moyenne_generale"].attributes, periods } } });
+  assert.match(html(render(pc.SkolengoCard, { device: "Alex Moreau", default_tab: "grades" }, gap)), /data-period="t1" aria-pressed="true"/);
   assert.match(sam, /15<small>\/20/);
 });
 
@@ -176,8 +208,9 @@ test("school life: counters and folding sections, folded back by a click elsewhe
   const card = render(pc.SkolengoCard, { device: "Alex Moreau", default_tab: "school_life" });
   let out = html(card);
   assert.match(out, /Late arrivals/);
-  assert.match(out, /Illness · Medical certificate given/);
-  assert.match(out, /1 unjustified/);
+  assert.match(out, /Illness · Medical certificate given<\/div><\/div><div class="end"><span class="chip ok"[^>]*>.*?Closed/);
+  assert.match(out, /Nov 13 13:30 – 15:30[\s\S]*?chip warn"[^>]*>.*?Pending/);
+  assert.match(out, /1 pending/);
   assert.match(out, /Sprained ankle/, "exemptions");
   assert.match(out, /Very good participation[\s\S]*?Positive/);
   assert.match(out, /Forgotten equipment[\s\S]*?Negative/);
@@ -207,13 +240,16 @@ test("a school news opens in a popup, its attachments signed by Home Assistant b
   assert.match(out, /Ms Renaud/);
   assert.match(out, /Parents are welcome at the concert/);
   assert.match(out, /data-action="file" data-path="\/api\/skolengo\/news_file\/entry_alex\/f1"[\s\S]*concert-programme\.pdf/);
-  pc.window.open = (url) => {
-    opened.push(url);
-    return null;
+  const tab = { opener: "page", location: { href: "" }, close() {} };
+  pc.window.open = (url, target, features) => {
+    opened.push([url, target, features ?? null]);
+    return tab;
   };
   await card._openFile("/api/skolengo/news_file/entry_alex/f1");
   assert.deepEqual(plain(calls), [{ type: "auth/sign_path", path: "/api/skolengo/news_file/entry_alex/f1", expires: 60 }]);
-  assert.deepEqual(opened.slice(-1), ["/api/skolengo/news_file/entry_alex/f1?authSig=x"]);
+  assert.deepEqual(plain(opened), [["", "_blank", null]], "one tab, opened at once, without noopener (which makes window.open return null)");
+  assert.equal(tab.opener, null, "the opener link is cut by hand");
+  assert.equal(tab.location.href, "/api/skolengo/news_file/entry_alex/f1?authSig=x");
   await card._openFile("https://evil.example/x");
   assert.equal(calls.length, 1, "only the integration's own files");
 });

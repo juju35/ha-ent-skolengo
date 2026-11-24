@@ -31,7 +31,7 @@ The cards work on top of the community [Skolengo integration](https://github.com
 - **Timetable** tab: today and the next school day, the lesson going on with a pulsing dot and its progress, past lessons dimmed, **canceled lessons struck through in red**, the lunch break between the morning and the afternoon, rooms and teachers, each subject in its Skolengo colour. Times are read in Home Assistant's time zone
 - **Homework** tab: grouped by due day, a check circle for the homework done and an empty one for the homework to do; a click opens its title, its full text (Skolengo's formatting turned into plain text) and its teacher in a popup at the top of the card
 - **Grades** tab: overall average of the term, latest grades on their own scale with their coefficient and the class average, averages per subject with a bar and the class marker, skill-based evaluations with one chip per skill in the colour of its mastery level; **period buttons** to switch between the terms or semesters
-- **School life** tab: counters (absences, late arrivals, observations, punishments), absences and late arrivals justified or not, exemptions, positive and negative observations, punishments, and the **school news** — a click opens the article with its attachments (opened through Home Assistant)
+- **School life** tab: counters (absences, late arrivals, observations, punishments), absences and late arrivals with their processing status (closed or pending, as the school records it), exemptions, positive and negative observations, punishments, and the **school news** — a click opens the article with its attachments (opened through Home Assistant)
 - Collapsible sections (chevron to the right when folded, down when unfolded), folded back by a click elsewhere on the page
 - Mini card: next lesson, the canceled lessons of the day still to come and the homework for the next school day; the detail button (top right) switches it to the full card's content and back, a click anywhere outside the card brings the compact view back
 - Click any value to open its Home Assistant history (more-info dialog)
@@ -52,7 +52,7 @@ The cards read these sensors, found by their `translation_key`: `student_class`,
 
 ## Prerequisites
 
-Home Assistant 2024.8 or later, with the [Skolengo integration](https://github.com/infernalK/ha-skolengo) configured for at least one student.
+Home Assistant 2024.8 or later, with the [Skolengo integration](https://github.com/infernalK/ha-skolengo) **1.0.83 or later** configured for at least one student (the cards read the subject colours, the per-period grades and the news attachments of recent versions).
 
 ## Installation
 
@@ -237,7 +237,7 @@ Overall average of the term with the period buttons, latest grades on their own 
 
 ### School life
 
-Counters, absences and late arrivals (justified or not), exemptions, observations, punishments and the school news; a news opens with its attachments:
+Counters, absences and late arrivals (closed or pending), exemptions, observations, punishments and the school news; a news opens with its attachments:
 
 | Light | Dark |
 |---|---|
@@ -298,10 +298,10 @@ All the homework for the next school day is done: a green check is drawn and spa
 
 The cards read the Home Assistant entity and device registries instead of entity ids: every entity of the `skolengo` platform is matched by its `translation_key` and grouped by the device it belongs to, one device per student (`Skolengo - <name>`). Entity ids can therefore be in any language or renamed without breaking the cards. The school news sensor sits on the school's own device and is given to the students of that school (by the school name of their class sensor). The lessons, homework, grades and the rest come from the attributes of the sensors, as the integration writes them.
 
-- **Times**: Skolengo gives instants in UTC; the cards read their day and time in Home Assistant's time zone.
+- **Times**: Skolengo gives instants in UTC; the cards read their day and time in Home Assistant's time zone (the browser's when your profile is set to local time).
 - **Next school day**: the integration's `timetable_next_day` sensor (the next day with lessons, after a weekend or a holiday). The timetable opens on today while a lesson is still to come, then on the next school day.
 - **Picture**: lesson going on → *class*; else a canceled lesson still to come that day → *canceled*; else homework to do for the next school day → *homework*; else all of it done → *done*; else still.
-- **Justified**: an absence or a late arrival is shown as justified once the school has recorded its reason.
+- **Status** of an absence or a late arrival: Skolengo's own processing status — *Closed* once the school has dealt with it (`LOCKED`), *Pending* while it is new or in progress — not a guess about whether it is justified.
 - **Attachments** of the school news are served by the integration behind Home Assistant's login: the card asks Home Assistant for a short-lived signed link before opening them.
 
 ## Development
