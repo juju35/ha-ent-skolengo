@@ -1,0 +1,19 @@
+{
+  "name": "ha-ent-skolengo",
+  "version": "1.0.0",
+  "description": "Lovelace cards and optional sidebar panel for Home Assistant showing the timetable, homework, grades and school life of the Skolengo integration, for one or several students.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/build.mjs && node --check dist/skolengo-card.js",
+    "test": "node --test test/*.test.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "acorn": "^8.19.0",
+    "css-tree": "^3.2.1",
+    "playwright": "^1.65.1"
+  }
+}
