@@ -408,6 +408,8 @@ export class SkolengoBase extends HTMLElement {
     // The tab is opened during the click (later, Safari blocks it), without `noopener` (window.open then returns
     // null): the opener link is cut by hand before the signed address is loaded in it.
     const win = window.open("", "_blank");
+    // The file opens in that tab later: cut its link back to this page (reverse tabnabbing).
+    if (win) win.opener = null;
     if (win) win.opener = null;
     try {
       const { path: signed } = await this._hass.callWS({ type: "auth/sign_path", path, expires: 60 });

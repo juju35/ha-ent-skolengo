@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-11-27
+
+### Fixes
+- Idle states use the theme's secondary text colour (`--secondary-text-color`), like every ha-* card.
+- Opening a document: the new tab no longer keeps a link back to the Home Assistant page (`opener` cut).
+
 ## 1.0.0 - 2026-11-24
 
 ### Features
